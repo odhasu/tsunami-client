@@ -132,4 +132,11 @@ function createEmbedForClient(clientKey) {
     return embed;
 }
 
-client.login(BOT_TOKEN);
+if (!BOT_TOKEN) {
+    console.error("FATAL ERROR: BOT_TOKEN is not defined in the environment variables!");
+    process.exit(1);
+}
+
+client.login(BOT_TOKEN).catch(error => {
+    console.error("Failed to login to Discord. Is your the token correct?", error);
+});
