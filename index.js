@@ -1,4 +1,14 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, REST, Routes, SlashCommandBuilder, PermissionsBitField } = require('discord.js');
+const http = require('http');
+
+// Render needs the bot to listen to a network port, or it will think it crashed
+const server = http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end('Bot is online!');
+});
+server.listen(process.env.PORT || 3000, () => {
+    console.log('Web server is running to satisfy Render health checks.');
+});
 
 // === CONFIGURATION ===
 const BOT_TOKEN = process.env.BOT_TOKEN; // Set this in Railway variables
