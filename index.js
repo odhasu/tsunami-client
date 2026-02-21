@@ -1,5 +1,7 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, REST, Routes, SlashCommandBuilder, PermissionsBitField } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, PermissionsBitField } = require('discord.js');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
 // Render needs the bot to listen to a network port, or it will think it crashed
 const server = http.createServer((req, res) => {
@@ -13,6 +15,24 @@ server.listen(process.env.PORT || 3000, () => {
 // === CONFIGURATION ===
 const BOT_TOKEN = process.env.BOT_TOKEN; // Set this in Railway variables
 const config = require('./config.json');
+
+// === MESSAGE STORE ===
+// Tracks sent embed message IDs so we can edit them later
+// Format: { "channelId:clientKey": "messageId", ... }
+const MESSAGE_STORE_PATH = path.join(__dirname, 'messageStore.json');
+
+function loadMessageStore() {
+    try {
+        const raw = fs.readFileSync(MESSAGE_STORE_PATH, 'utf8');
+        return JSON.parse(raw);
+    } catch {
+        return {};
+    }
+}
+
+function saveMessageStore(store) {
+    fs.writeFileSync(MESSAGE_STORE_PATH, JSON.stringify(store, null, 2), 'utf8');
+}
 
 const CLIENT_CHOICES = [
     { name: 'Tsunami', value: 'tsunami' },
@@ -28,7 +48,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const commands = [
     new SlashCommandBuilder()
         .setName('embed')
-        .setDescription('Send a download embed for a specific client to a channel')
+        .setDescription('Send (or update) a download embed for a specific client to a channel')
         .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator)
         .addStringOption(option => {
             option.setName('client')
@@ -79,21 +99,37 @@ client.on('interactionCreate', async interaction => {
         }
 
         const embed = createEmbedForClient(clientKey);
+        const clientName = CLIENT_CHOICES.find(c => c.value === clientKey).name;
 
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setLabel('Download')
-                    .setURL(config.downloads[clientKey] || 'https://example.com')
-                    .setStyle(ButtonStyle.Link)
-            );
+        const storeKey = `${channel.id}:${clientKey}`;
+        const store = loadMessageStore();
+        const existingMessageId = store[storeKey];
 
         try {
-            await channel.send({ embeds: [embed], components: [row] });
-            await interaction.reply({ content: `Successfully sent the **${CLIENT_CHOICES.find(c => c.value === clientKey).name}** embed to ${channel}!`, ephemeral: true });
+            if (existingMessageId) {
+                // Try to fetch and edit the existing message
+                try {
+                    const existingMessage = await channel.messages.fetch(existingMessageId);
+                    await existingMessage.edit({ embeds: [embed] });
+                    await interaction.reply({ content: `✅ Updated the **${clientName}** embed in ${channel}!`, ephemeral: true });
+                } catch (fetchError) {
+                    // Message was deleted or can't be fetched — send a new one
+                    console.warn(`Could not fetch existing message for ${storeKey}, sending a new one.`);
+                    const sent = await channel.send({ embeds: [embed] });
+                    store[storeKey] = sent.id;
+                    saveMessageStore(store);
+                    await interaction.reply({ content: `✅ Sent a new **${clientName}** embed to ${channel} (old message was gone).`, ephemeral: true });
+                }
+            } else {
+                // No existing message — send fresh
+                const sent = await channel.send({ embeds: [embed] });
+                store[storeKey] = sent.id;
+                saveMessageStore(store);
+                await interaction.reply({ content: `✅ Sent the **${clientName}** embed to ${channel}!`, ephemeral: true });
+            }
         } catch (error) {
             console.error(error);
-            await interaction.reply({ content: 'Failed to send the embed. Do I have permission to send messages in that channel?', ephemeral: true });
+            await interaction.reply({ content: 'Failed to send/update the embed. Do I have permission to send messages in that channel?', ephemeral: true });
         }
     }
 });
